@@ -139,9 +139,9 @@ pub(super) fn run_job(job: &EntityJob, ctx: &PassContext<'_>) -> Vec<MeshData> {
 
 /// The per-job router: a fresh one at the pass scale, armed with the model-wide
 /// caches (content dedup #1109, brep signatures, IfcMappedItem sources #1623)
-/// and, when enabled, the #1623 Phase 2 don't-bake plan.
+/// and, when enabled, the #1623 Phase 2 don't-bake plan and the cut cache.
 fn job_router(ctx: &PassContext<'_>) -> GeometryRouter {
-    crate::execution::build_router(
+    let mut router = crate::execution::build_router(
         RouterConfig {
             unit_scale: ctx.unit_scale,
             tessellation_quality: ctx.quality,
@@ -157,7 +157,11 @@ fn job_router(ctx: &PassContext<'_>) -> GeometryRouter {
         ctx.material_layers.clone(),
         ctx.instancing_plan.as_ref(),
         ctx.indexed_colour_split_ids.as_ref(),
-    )
+    );
+    if let Some(cache) = &ctx.cut_cache {
+        router.enable_cut_cache(cache.clone());
+    }
+    router
 }
 
 fn mesh_job(

@@ -46,6 +46,7 @@ pub(crate) use context::{ParamRectCut, VoidContext};
 mod batch_cutter;
 pub(crate) mod bool2d_path;
 mod coaxial_union;
+pub(crate) mod cut_cache;
 mod cutter;
 pub(crate) mod geom;
 mod malformed_opening_repair;
@@ -135,6 +136,19 @@ impl GeometryRouter {
     ) -> Result<Vec<Mesh>> {
         // The host walk, its void context and each part's cut: the common
         // program's void control. With no openings it is the plain walk.
+        match self.cached_cut(element, decoder, void_index) {
+            Some(parts) => parts,
+            None => self.process_element_with_voids_parts_uncached(element, decoder, void_index),
+        }
+    }
+
+    /// [`Self::process_element_with_voids_parts`] without the cut cache.
+    pub(crate) fn process_element_with_voids_parts_uncached(
+        &self,
+        element: &DecodedEntity,
+        decoder: &mut EntityDecoder,
+        void_index: &FxHashMap<u32, Vec<u32>>,
+    ) -> Result<Vec<Mesh>> {
         let opening_ids = void_index.get(&element.id).map(Vec::as_slice).unwrap_or_default();
         crate::program::GeometryProgram::voided(element, opening_ids).drain_parts(self, decoder)
     }
@@ -249,6 +263,19 @@ impl GeometryRouter {
         // the layered slicing without voids (an element whose voided slicing
         // declined can still slice uncut, and then each layer is cut); its
         // void context is classified ONCE per element, not per sub-mesh.
+        match self.cached_cut(element, decoder, void_index) {
+            Some(sub_meshes) => sub_meshes,
+            None => self.process_element_with_submeshes_and_voids_uncached(element, decoder, void_index),
+        }
+    }
+
+    /// [`Self::process_element_with_submeshes_and_voids`] without the cut cache.
+    pub(crate) fn process_element_with_submeshes_and_voids_uncached(
+        &self,
+        element: &DecodedEntity,
+        decoder: &mut EntityDecoder,
+        void_index: &FxHashMap<u32, Vec<u32>>,
+    ) -> Result<SubMeshCollection> {
         let opening_ids = void_index.get(&element.id).map(Vec::as_slice).unwrap_or_default();
         crate::program::GeometryProgram::voided_styled(element, opening_ids).drain_styled(self, decoder)
     }

@@ -6,7 +6,7 @@
 
 pub(crate) mod mapped;
 mod mesh_world;
-pub(crate) use mesh_world::{WorldFrame, LARGE_MAPPED_ORIGIN_M};
+pub(crate) use mesh_world::{WorldFrame, FAR_RTC_FRAME_M, LARGE_MAPPED_ORIGIN_M};
 pub(crate) mod operator;
 
 use super::GeometryRouter;
@@ -88,6 +88,13 @@ pub(crate) fn local_frame_enabled() -> bool {
 #[inline]
 pub(crate) fn instancing_enabled() -> bool {
     true
+}
+
+impl ObjectPlacement {
+    /// False for the identity fallback of an absent placement.
+    pub(crate) fn is_placed(&self) -> bool {
+        self.placed
+    }
 }
 
 impl GeometryRouter {
