@@ -105,6 +105,8 @@ mod terrain_cdt;
 mod clash_contact_axes;
 pub mod clash_solid;
 pub mod csg;
+/// Openings that remove nothing from their host, judged before any cut.
+pub mod empty_cut;
 /// Opt-in geometry document: object-local display-mesh definitions and f64
 /// placed occurrences with typed identity and revision. Off every default path.
 pub mod document;
