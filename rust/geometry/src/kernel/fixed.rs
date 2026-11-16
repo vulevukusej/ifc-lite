@@ -433,6 +433,37 @@ pub fn orient2d_from_lam(a: &Lam, b: &Lam, c: &Lam, axis: DropAxis) -> Option<Si
     Some(super::assemble_sign(bsign(&det), &[bsign(d2), bsign(d3)]))
 }
 
+/// [`orient2d_from_lam`] evaluated in I2048: the cached I512 lambdas widened,
+/// for the second-order products that overflow I512 (fine-scale points).
+/// The sign is the exact orientation of the same three points, which every
+/// exact tier agrees on; `None` only on an I2048 overflow.
+pub fn orient2d_from_lam_wide(a: &Lam, b: &Lam, c: &Lam, axis: DropAxis) -> Option<Sign> {
+    use num_traits::{CheckedMul, CheckedSub};
+    type W = crate::kernel::fixed_int::FixedInt<32>;
+    let w = |x: &Big| -> W { x.widen::<32>() };
+    let mul = |x: W, y: W| CheckedMul::checked_mul(&x, &y);
+    let sub = |x: W, y: W| CheckedSub::checked_sub(&x, &y);
+    let sign = |x: &W| {
+        if x.is_negative() {
+            Sign::Negative
+        } else if x.is_zero() {
+            Sign::Zero
+        } else {
+            Sign::Positive
+        }
+    };
+    let (i, j) = axis_ij(axis);
+    let (lam1, d1) = (a.0.map(|x| w(&x)), w(&a.1));
+    let (lam2, d2) = (b.0.map(|x| w(&x)), w(&b.1));
+    let (lam3, d3) = (c.0.map(|x| w(&x)), w(&c.1));
+    let u_i = sub(mul(d1, lam2[i])?, mul(d2, lam1[i])?)?;
+    let u_j = sub(mul(d1, lam2[j])?, mul(d2, lam1[j])?)?;
+    let v_i = sub(mul(d1, lam3[i])?, mul(d3, lam1[i])?)?;
+    let v_j = sub(mul(d1, lam3[j])?, mul(d3, lam1[j])?)?;
+    let det = sub(mul(u_i, v_j)?, mul(u_j, v_i)?)?;
+    Some(super::assemble_sign(sign(&det), &[sign(&d2), sign(&d3)]))
+}
+
 /// Lexicographic compare of two interned points from their cached lambdas.
 pub fn cmp_lex_from_lam(a: &Lam, b: &Lam) -> Option<Sign> {
     use num_traits::ToPrimitive;

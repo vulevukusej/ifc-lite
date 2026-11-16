@@ -50,15 +50,25 @@ pub(crate) fn orient2d_v(it: &Interner, a: Vid, b: Vid, c: Vid, axis: DropAxis) 
     if let Some(s) = interval::orient2d_from_lam_iv(it.lam_iv(a), it.lam_iv(b), it.lam_iv(c), axis) {
         return s;
     }
-    if let (Some(la), Some(lb), Some(lc)) = (it.lam(a), it.lam(b), it.lam(c)) {
+    let lams = (it.lam(a), it.lam(b), it.lam(c));
+    if let (Some(la), Some(lb), Some(lc)) = lams {
         if let Some(s) = fixed::orient2d_from_lam(la, lb, lc, axis) {
             return s;
         }
     }
     // Three implicit points: `orient2d_any` would rerun the interval tier on
     // the very lambdas the interner cached, the same determinant that just
-    // straddled above, so go straight to its exact tiers.
+    // straddled above, so go straight to its exact tiers. Their first tier
+    // re-derives the three lambdas width by width; the cached ones, widened,
+    // give the same exact sign without that.
     if ![pa, pb, pc].iter().any(|p| matches!(p, ImplicitPoint::Explicit(_))) {
+        if let (Some(la), Some(lb), Some(lc)) = lams {
+            super::budget::note_escalation();
+            if let Some(s) = fixed::orient2d_from_lam_wide(la, lb, lc, axis) {
+                return s;
+            }
+            return super::predicates::orient2d_3i_exact_counted(pa, pb, pc, axis);
+        }
         return super::predicates::orient2d_3i_exact(pa, pb, pc, axis);
     }
     orient2d_any(pa, pb, pc, axis)

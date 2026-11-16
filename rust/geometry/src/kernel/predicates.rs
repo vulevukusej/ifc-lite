@@ -96,6 +96,11 @@ pub fn orient2d_3i(a: &ImplicitPoint, b: &ImplicitPoint, c: &ImplicitPoint, axis
 /// cascade does.
 pub(crate) fn orient2d_3i_exact(a: &ImplicitPoint, b: &ImplicitPoint, c: &ImplicitPoint, axis: DropAxis) -> Sign {
     crate::kernel::budget::note_escalation();
+    orient2d_3i_exact_counted(a, b, c, axis)
+}
+
+/// [`orient2d_3i_exact`] for a caller that has already counted the escalation.
+pub(crate) fn orient2d_3i_exact_counted(a: &ImplicitPoint, b: &ImplicitPoint, c: &ImplicitPoint, axis: DropAxis) -> Sign {
     fixed::orient2d_3i(a, b, c, axis).unwrap_or_else(|| rational::orient2d_3i(a, b, c, axis))
 }
 
