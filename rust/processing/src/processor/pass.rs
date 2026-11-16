@@ -28,7 +28,7 @@ use crate::mesh_frame::MeshCoordinateSpace;
 use crate::style::{GeometryStyleInfo, ModelFinishes};
 use crate::types::mesh::{MeshData, RawInstanceOccurrence};
 use ifc_lite_core::EntityDecoder;
-use ifc_lite_geometry::{GeometryRouter, TessellationQuality};
+use ifc_lite_geometry::{GeometryRouter, RouterConfig, TessellationQuality};
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::HashSet;
@@ -165,6 +165,9 @@ impl<'c> PassContext<'c> {
             .then(|| crate::style::indexed_colour_split_guard_ids(&indexed_colour_full))
             .flatten();
         let geometry_style_index = Arc::new(geometry_style_index);
+        let config = RouterConfig { unit_scale, rtc_offset, tessellation_quality: req.quality, ..RouterConfig::default() };
+        let plane_angle = facts.unit_scales.plane_angle_to_radians;
+        let void_index = super::empty_cuts::drop_empty_cuts(content, &entity_index, void_index, &config, plane_angle);
         let layers = facts.material_layers.as_deref();
         let cut_cache = ifc_lite_geometry::CutCache::build(&void_index, || entity_index.decoder(content),
             |id| layers.is_some_and(|layers| layers.is_sliceable(id)));
