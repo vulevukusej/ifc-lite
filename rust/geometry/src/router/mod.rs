@@ -166,6 +166,7 @@ pub struct GeometryRouter {
     /// and `process_element_with_submeshes_and_voids` first attempt to slice
     /// single-solid elements by their `IfcMaterialLayerSetUsage` buildup.
     material_layer_index: Option<Arc<MaterialLayerIndex>>,
+    cut_cache: Option<voids::cut_cache::SharedCutCache>, // `enable_cut_cache`: one cut per group of identical hosts
     /// Boolean / CSG failures attributed by IFC product express ID. Populated
     /// by the void-subtraction path (`apply_void_context`) when the BSP
     /// kernel falls back to the un-cut host. Drainable via
@@ -256,6 +257,7 @@ impl GeometryRouter {
             length_unit_refused: false,
             config: RouterConfig::default(),
             material_layer_index: None,
+            cut_cache: None,
             csg_failures: RefCell::new(FxHashMap::default()),
             stopped_csg_failures: RefCell::new(FxHashMap::default()),
             csg_scope: CsgScopeState::default(),
@@ -521,19 +523,17 @@ impl GeometryRouter {
 
     /// Create router with a specific tessellation quality level
     pub fn with_quality(quality: TessellationQuality) -> Self {
-        let tessellation_quality = quality;
         Self::from_config(RouterConfig {
-            tessellation_quality,
+            tessellation_quality: quality,
             ..RouterConfig::default()
         })
     }
 
     /// Create router with both unit scale and tessellation quality
     pub fn with_scale_and_quality(unit_scale: f64, quality: TessellationQuality) -> Self {
-        let tessellation_quality = quality;
         Self::from_config(RouterConfig {
             unit_scale,
-            tessellation_quality,
+            tessellation_quality: quality,
             ..RouterConfig::default()
         })
     }
