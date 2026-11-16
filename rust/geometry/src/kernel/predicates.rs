@@ -88,22 +88,28 @@ pub fn orient2d_2i(a: &ImplicitPoint, b: &ImplicitPoint, c: [f64; 3], axis: Drop
 
 /// orient2d with three implicit points (a,b,c) — cascade.
 pub fn orient2d_3i(a: &ImplicitPoint, b: &ImplicitPoint, c: &ImplicitPoint, axis: DropAxis) -> Sign {
-    interval::orient2d_3i(a, b, c, axis)
-        .or_else(|| {
-            crate::kernel::budget::note_escalation();
-            fixed::orient2d_3i(a, b, c, axis)
-        })
-        .unwrap_or_else(|| rational::orient2d_3i(a, b, c, axis))
+    interval::orient2d_3i(a, b, c, axis).unwrap_or_else(|| orient2d_3i_exact(a, b, c, axis))
+}
+
+/// The exact tiers of [`orient2d_3i`], for a caller whose interval tier on the
+/// same three points has already straddled. Counts the escalation as the
+/// cascade does.
+pub(crate) fn orient2d_3i_exact(a: &ImplicitPoint, b: &ImplicitPoint, c: &ImplicitPoint, axis: DropAxis) -> Sign {
+    crate::kernel::budget::note_escalation();
+    fixed::orient2d_3i(a, b, c, axis).unwrap_or_else(|| rational::orient2d_3i(a, b, c, axis))
 }
 
 /// Exact lexicographic total order on points — the interner's comparison (cascade).
 pub fn cmp_lex(a: &ImplicitPoint, b: &ImplicitPoint) -> Sign {
-    interval::cmp_lex(a, b)
-        .or_else(|| {
-            crate::kernel::budget::note_escalation();
-            fixed::cmp_lex(a, b)
-        })
-        .unwrap_or_else(|| rational::cmp_lex(a, b))
+    interval::cmp_lex(a, b).unwrap_or_else(|| cmp_lex_exact(a, b))
+}
+
+/// The exact tiers of [`cmp_lex`], for a caller whose interval tier on the
+/// same two points has already straddled. Counts the escalation as the
+/// cascade does.
+pub(crate) fn cmp_lex_exact(a: &ImplicitPoint, b: &ImplicitPoint) -> Sign {
+    crate::kernel::budget::note_escalation();
+    fixed::cmp_lex(a, b).unwrap_or_else(|| rational::cmp_lex(a, b))
 }
 
 #[inline]

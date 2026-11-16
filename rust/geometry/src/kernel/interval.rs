@@ -64,6 +64,40 @@ impl RnInterval {
     }
     #[inline]
     pub fn mul(self, o: Self) -> Self {
+        let (a, b, c, d) = (self.lo, self.hi, o.lo, o.hi);
+        // Finite, ordered bounds: the extreme products follow from the signs
+        // alone. Rounding to nearest is monotone, so the smallest (largest)
+        // rounded product is the rounding of the smallest (largest) real
+        // one, the value the four-product scan below selects; two such
+        // values differ at most in the sign of a zero, which `next_down`
+        // and `next_up` map to the same bound.
+        if a.is_finite() && b.is_finite() && c.is_finite() && d.is_finite() && a <= b && c <= d {
+            let (mn, mx) = if a >= 0.0 {
+                if c >= 0.0 {
+                    (a * c, b * d)
+                } else if d <= 0.0 {
+                    (b * c, a * d)
+                } else {
+                    (b * c, b * d)
+                }
+            } else if b <= 0.0 {
+                if c >= 0.0 {
+                    (a * d, b * c)
+                } else if d <= 0.0 {
+                    (b * d, a * c)
+                } else {
+                    (a * d, a * c)
+                }
+            } else if c >= 0.0 {
+                (a * d, b * d)
+            } else if d <= 0.0 {
+                (b * c, a * c)
+            } else {
+                let (ad, bc, ac, bd) = (a * d, b * c, a * c, b * d);
+                (if bc < ad { bc } else { ad }, if bd > ac { bd } else { ac })
+            };
+            return Self { lo: next_down(mn), hi: next_up(mx) };
+        }
         let c = [self.lo * o.lo, self.lo * o.hi, self.hi * o.lo, self.hi * o.hi];
         let mut mn = c[0];
         let mut mx = c[0];
@@ -331,9 +365,25 @@ pub fn orient2d_3i(a: &ImplicitPoint, b: &ImplicitPoint, c: &ImplicitPoint, axis
     Some(super::assemble_sign(det.sign()?, &[sd2, sd3]))
 }
 
+/// One side of a `cmp_lex`: an explicit point's coordinates, or an implicit
+/// point's interval lambda, computed once for all three axes.
+enum LexSide {
+    Explicit([f64; 3]),
+    Implicit(IvLam),
+}
+
+impl LexSide {
+    fn of(p: &ImplicitPoint) -> Self {
+        match p {
+            ImplicitPoint::Explicit(e) => Self::Explicit(*e),
+            _ => Self::Implicit(ilambda_cached(p)),
+        }
+    }
+}
+
 /// Interval tier of one `cmp_lex` axis comparison — `None` on a zero-straddle.
-fn icmp_axis(a: &ImplicitPoint, b: &ImplicitPoint, k: usize) -> Option<Sign> {
-    use ImplicitPoint::Explicit;
+fn icmp_axis(a: &LexSide, b: &LexSide, k: usize) -> Option<Sign> {
+    use LexSide::{Explicit, Implicit};
     match (a, b) {
         (Explicit(ae), Explicit(be)) => Some(if ae[k] < be[k] {
             Sign::Negative
@@ -342,20 +392,16 @@ fn icmp_axis(a: &ImplicitPoint, b: &ImplicitPoint, k: usize) -> Option<Sign> {
         } else {
             Sign::Zero
         }),
-        (_, Explicit(be)) => {
-            let (lam, d) = ilambda_cached(a);
+        (Implicit((lam, d)), Explicit(be)) => {
             let num = lam[k].sub(d.mul(RnInterval::point(be[k])));
             Some(super::assemble_sign(num.sign()?, &[d.sign()?]))
         }
-        (Explicit(ae), _) => {
-            let (lam, d) = ilambda_cached(b);
-            let num = RnInterval::point(ae[k]).mul(d).sub(lam[k]);
+        (Explicit(ae), Implicit((lam, d))) => {
+            let num = RnInterval::point(ae[k]).mul(*d).sub(lam[k]);
             Some(super::assemble_sign(num.sign()?, &[d.sign()?]))
         }
-        (_, _) => {
-            let (la, da) = ilambda_cached(a);
-            let (lb, db) = ilambda_cached(b);
-            let num = la[k].mul(db).sub(lb[k].mul(da));
+        (Implicit((la, da)), Implicit((lb, db))) => {
+            let num = la[k].mul(*db).sub(lb[k].mul(*da));
             Some(super::assemble_sign(num.sign()?, &[da.sign()?, db.sign()?]))
         }
     }
@@ -364,11 +410,76 @@ fn icmp_axis(a: &ImplicitPoint, b: &ImplicitPoint, k: usize) -> Option<Sign> {
 /// Interval tier of `rational::cmp_lex`. `None` if the deciding axis straddles
 /// zero (escalate to exact). A definite-Zero axis advances to the next.
 pub fn cmp_lex(a: &ImplicitPoint, b: &ImplicitPoint) -> Option<Sign> {
+    let (a, b) = (LexSide::of(a), LexSide::of(b));
     for k in 0..3 {
-        match icmp_axis(a, b, k)? {
+        match icmp_axis(&a, &b, k)? {
             Sign::Zero => continue,
             s => return Some(s),
         }
     }
     Some(Sign::Zero)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{next_down, next_up, RnInterval};
+
+    /// The four-product scan `mul` used before its sign-case fast path.
+    fn mul_by_scan(x: RnInterval, o: RnInterval) -> RnInterval {
+        let c = [x.lo * o.lo, x.lo * o.hi, x.hi * o.lo, x.hi * o.hi];
+        let mut mn = c[0];
+        let mut mx = c[0];
+        for &v in &c[1..] {
+            if v < mn {
+                mn = v;
+            }
+            if v > mx {
+                mx = v;
+            }
+        }
+        RnInterval { lo: next_down(mn), hi: next_up(mx) }
+    }
+
+    /// The sign-case fast path returns the scan's bounds bit for bit, for
+    /// ordinary, tiny, huge, signed-zero, infinite, NaN and unordered bounds.
+    #[test]
+    fn mul_matches_the_four_product_scan_bit_for_bit() {
+        let specials = [
+            0.0, -0.0, 1.0, -1.0, f64::MIN_POSITIVE, -f64::MIN_POSITIVE, f64::from_bits(1),
+            -f64::from_bits(1), f64::MAX, f64::MIN, 1.0e300, -1.0e300, f64::INFINITY,
+            f64::NEG_INFINITY, f64::NAN, 3.0, -2.5, 0.1, -0.1, 1.0e-200,
+        ];
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let value = |r: u64| -> f64 {
+            match r % 4 {
+                0 => specials[(r >> 8) as usize % specials.len()],
+                1 => ((r >> 11) as f64 / (1u64 << 53) as f64 - 0.5) * 1.0e4,
+                2 => f64::from_bits(r.rotate_left(29)),
+                _ => ((r >> 11) as f64 / (1u64 << 53) as f64 - 0.5) * 2.0e-3,
+            }
+        };
+        for _ in 0..2_000_000 {
+            let (r1, r2, r3, r4) = (next(), next(), next(), next());
+            let (a, b, c, d) = (value(r1), value(r2), value(r3), value(r4));
+            // Mostly ordered, as the kernel builds them; sometimes not.
+            let order = next() % 8 != 0;
+            let (a, b) = if order && b < a { (b, a) } else { (a, b) };
+            let (c, d) = if order && d < c { (d, c) } else { (c, d) };
+            let x = RnInterval { lo: a, hi: b };
+            let o = RnInterval { lo: c, hi: d };
+            let fast = x.mul(o);
+            let scan = mul_by_scan(x, o);
+            assert_eq!(
+                (fast.lo.to_bits(), fast.hi.to_bits()),
+                (scan.lo.to_bits(), scan.hi.to_bits()),
+                "[{a:e}, {b:e}] * [{c:e}, {d:e}]"
+            );
+        }
+    }
 }

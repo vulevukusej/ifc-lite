@@ -55,6 +55,12 @@ pub(crate) fn orient2d_v(it: &Interner, a: Vid, b: Vid, c: Vid, axis: DropAxis) 
             return s;
         }
     }
+    // Three implicit points: `orient2d_any` would rerun the interval tier on
+    // the very lambdas the interner cached, the same determinant that just
+    // straddled above, so go straight to its exact tiers.
+    if ![pa, pb, pc].iter().any(|p| matches!(p, ImplicitPoint::Explicit(_))) {
+        return super::predicates::orient2d_3i_exact(pa, pb, pc, axis);
+    }
     orient2d_any(pa, pb, pc, axis)
 }
 
@@ -71,6 +77,12 @@ pub(crate) fn cmp_lex_v(it: &Interner, a: Vid, b: Vid) -> Sign {
         }
     }
     let (pa, pb) = (it.get(a), it.get(b));
+    // Two implicit points: the interval tier of `cmp_lex` is the per-axis
+    // determinant `cmp_lex_from_lam_iv` just evaluated on the same cached
+    // lambdas, so it cannot resolve either; skip to the exact tiers.
+    if !matches!(pa, ImplicitPoint::Explicit(_)) && !matches!(pb, ImplicitPoint::Explicit(_)) {
+        return super::predicates::cmp_lex_exact(pa, pb);
+    }
     cmp_lex(pa, pb)
 }
 
