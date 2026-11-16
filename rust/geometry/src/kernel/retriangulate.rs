@@ -298,7 +298,7 @@ pub(crate) fn coord2d_cached(
     if let Some(&c) = cache.get(&v) {
         return c;
     }
-    let c = fixed::point_to_f64(it.get(v)).map(|p3| project2d(p3, axis));
+    let c = it.point_f64(v).map(|p3| project2d(p3, axis));
     cache.insert(v, c);
     c
 }
@@ -461,7 +461,7 @@ pub fn earcut(it: &Interner, ring: &[Vid], axis: DropAxis, w0: Sign) -> Vec<SubT
     // whole triangulation, is byte-identical to the all-exact form (parity).
     let mut pc: Vec<Option<[f64; 2]>> = poly
         .iter()
-        .map(|&v| fixed::point_to_f64(it.get(v)).map(|p3| project2d(p3, axis)))
+        .map(|&v| it.point_f64(v).map(|p3| project2d(p3, axis)))
         .collect();
     let mut out = Vec::new();
     while poly.len() > 3 {

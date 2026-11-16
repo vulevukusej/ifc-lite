@@ -35,6 +35,10 @@ pub struct Interner {
     // majority never touches wasm-emulated wide integers. Always present (f64 is
     // always computable, even where the I512 lambda overflows to `None`).
     lambdas_iv: Vec<interval::IvLam>,
+    // Per-Vid memo of `fixed::point_to_f64` (outer `None` = not computed yet),
+    // for the broadphase prefilters and the off-plane cleanup that read the
+    // same vertices' f64 images many times during one re-triangulation.
+    f64s: std::cell::RefCell<Vec<Option<Option<[f64; 3]>>>>,
 }
 
 impl Interner {
@@ -75,6 +79,7 @@ impl Interner {
                 self.points.push(p);
                 self.lambdas.push(new_lam);
                 self.lambdas_iv.push(new_lam_iv);
+                self.f64s.get_mut().push(None);
                 self.sorted.insert(idx, vid);
                 vid
             }
@@ -89,6 +94,18 @@ impl Interner {
     #[inline]
     pub fn lam(&self, v: Vid) -> &Option<fixed::Lam> {
         &self.lambdas[v as usize]
+    }
+
+    /// `fixed::point_to_f64` of a Vid's point, computed once.
+    pub fn point_f64(&self, v: Vid) -> Option<[f64; 3]> {
+        if let Some(Some(cached)) = self.f64s.borrow().get(v as usize) {
+            return *cached;
+        }
+        let value = fixed::point_to_f64(&self.points[v as usize]);
+        if let Some(slot) = self.f64s.borrow_mut().get_mut(v as usize) {
+            *slot = Some(value);
+        }
+        value
     }
 
     /// The cached f64-interval lambda for a Vid (always present).
