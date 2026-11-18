@@ -30,7 +30,8 @@ mod frame;
 /// sub-meshes are collected anew, keeping only non-empty ones.
 enum Parts {
     Merged { parts: Vec<Mesh>, next: usize },
-    Styled { rest: std::vec::IntoIter<SubMesh>, done: SubMeshCollection },
+    /// `occurrences`: those of the part being cut, which its cut keeps.
+    Styled { rest: std::vec::IntoIter<SubMesh>, done: SubMeshCollection, occurrences: Vec<u32> },
 }
 
 enum Cutting {
@@ -336,6 +337,7 @@ fn context_ready<'a>(output: Result<OpeningOutput>, hosts: ProductOutput) -> Pha
         ProductOutput::Styled(sub_meshes) => Parts::Styled {
             done: SubMeshCollection { sub_meshes: Vec::new(), ids_are_materials: sub_meshes.ids_are_materials },
             rest: sub_meshes.sub_meshes.into_iter(),
+            occurrences: Vec::new(),
         },
     };
     advance(context, parts)
@@ -363,9 +365,11 @@ fn keep_cut(parts: &mut Parts, id: u32, mesh: Mesh) {
             }
             *next += 1;
         }
-        Parts::Styled { done, .. } => {
+        Parts::Styled { done, occurrences, .. } => {
             if !mesh.is_empty() {
-                done.sub_meshes.push(SubMesh::new(id, mesh));
+                let mut sub = SubMesh::new(id, mesh);
+                sub.occurrences = std::mem::take(occurrences);
+                done.sub_meshes.push(sub);
             }
         }
     }
@@ -375,7 +379,10 @@ fn keep_cut(parts: &mut Parts, id: u32, mesh: Mesh) {
 fn take_part(parts: &mut Parts) -> Option<(u32, Mesh)> {
     match parts {
         Parts::Merged { parts, next } => parts.get_mut(*next).map(|part| (0, std::mem::take(part))),
-        Parts::Styled { rest, .. } => rest.next().map(|sub| (sub.geometry_id, sub.mesh)),
+        Parts::Styled { rest, occurrences, .. } => rest.next().map(|sub| {
+            *occurrences = sub.occurrences;
+            (sub.geometry_id, sub.mesh)
+        }),
     }
 }
 

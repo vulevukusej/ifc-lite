@@ -137,6 +137,11 @@ pub struct SubMesh {
     pub uvs: Option<Vec<f32>>,
     /// The surface texture sampled by `uvs` (#1781).
     pub texture: Option<crate::processors::texture::TextureAttachment>,
+    /// The `IfcMappedItem` occurrences this sub-mesh was produced under, inner
+    /// to outer: empty for a direct item. Two occurrences of one shared item
+    /// carry the same `geometry_id` and differ only here, so a style on the
+    /// occurrence (#10698) is looked up from this, never from the shared item.
+    pub occurrences: Vec<u32>,
 }
 
 impl SubMesh {
@@ -147,6 +152,7 @@ impl SubMesh {
             mesh,
             uvs: None,
             texture: None,
+            occurrences: Vec::new(),
         }
     }
 
@@ -162,6 +168,7 @@ impl SubMesh {
             mesh,
             uvs: Some(uvs),
             texture: Some(texture),
+            occurrences: Vec::new(),
         }
     }
 }
