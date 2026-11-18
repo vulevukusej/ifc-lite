@@ -61,7 +61,7 @@ use std::collections::BTreeMap;
 #[path = "element_degenerate.rs"]
 mod degenerate;
 mod element_color;
-use element_color::{find_indexed_colour_for_element, infer_opening_subpart_material_name};
+use element_color::{find_indexed_colour_for_element, infer_opening_subpart_material_name, mapped_occurrence_style_source};
 // Re-exported because they have callers outside this module: the colour
 // resolvers from processor/, the style-source walks from style::finish_join.
 pub(crate) use element_color::{find_geometry_item_color, resolve_color_for_representation_map};
