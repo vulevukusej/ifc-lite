@@ -79,15 +79,9 @@ impl<'a> MappingControl<'a> {
         };
         let mut meshes = std::mem::take(&mut self.meshes);
         let produced = meshes.sub_meshes.get_mut(*start..).unwrap_or_default();
-        if let Some(transform) = &level.transform {
-            router.bake_styled_mapping(produced, transform);
-        }
-        // This level's occurrence encloses everything produced under it; inner
-        // levels finished first, so each sub-mesh's chain reads inner to outer.
-        // A shared-registry or type-map root (`u32::MAX`) is no occurrence.
-        if level.item_id != u32::MAX {
-            produced.iter_mut().for_each(|sub| sub.occurrences.push(level.item_id));
-        }
+        if let Some(transform) = &level.transform { router.bake_styled_mapping(produced, transform); }
+        // The occurrence encloses all it produced (inner levels finished first); a `u32::MAX` root is none.
+        if level.item_id != u32::MAX { produced.iter_mut().for_each(|sub| sub.occurrences.push(level.item_id)); }
         if template.is_some() {
             GeometryRouter::retag_dont_bake_template(produced, level.source_id, level.transform.as_ref());
         }
@@ -120,9 +114,7 @@ impl<'a> MappingControl<'a> {
         let Placeholder { item_id, solid_id, source_id, transform } = placeholder;
         let mut meshes = std::mem::take(&mut self.meshes);
         let mesh = GeometryRouter::dont_bake_placeholder(source_id, transform.as_ref());
-        let mut sub = crate::SubMesh::new(solid_id, mesh);
-        sub.occurrences.push(item_id);
-        meshes.sub_meshes.push(sub);
+        meshes.sub_meshes.push(crate::SubMesh { occurrences: vec![item_id], ..crate::SubMesh::new(solid_id, mesh) });
         MappingValue::Placeholder(meshes)
     }
 
