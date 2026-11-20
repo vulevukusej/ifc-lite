@@ -165,3 +165,74 @@ fn finishes_event_matches_the_rescan_join_on_real_fixtures_8341() {
         }
     }
 }
+
+/// A directly styled body: one face set (#61) whose attached style authors
+/// SpecularColour 0.75, so roughness 0.25.
+const DIRECT: &str = r#"ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('issue-8341 deferred'),'2;1');
+FILE_NAME('t.ifc','2026-11-20T00:00:00',(''),(''),'','','');
+FILE_SCHEMA(('IFC4'));
+ENDSEC;
+DATA;
+#1=IFCPROJECT('0$ScRe4drECQ4DMSqUjd6d',$,'P',$,$,$,$,(#2),#3);
+#2=IFCGEOMETRICREPRESENTATIONCONTEXT($,'Model',3,1.0E-5,#5,$);
+#3=IFCUNITASSIGNMENT((#6));
+#4=IFCCARTESIANPOINT((0.,0.,0.));
+#5=IFCAXIS2PLACEMENT3D(#4,$,$);
+#6=IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.);
+#49=IFCCARTESIANPOINTLIST3D(((0.,0.,0.),(1.,0.,0.),(0.,1.,0.),(0.,0.,1.)));
+#52=IFCSURFACESTYLE($,.POSITIVE.,(#54));
+#54=IFCSURFACESTYLERENDERING(#56,$,$,$,$,$,IFCNORMALISEDRATIOMEASURE(0.75),$,.NOTDEFINED.);
+#56=IFCCOLOURRGB($,0.6,0.5,0.4);
+#61=IFCTRIANGULATEDFACESET(#49,$,.T.,((1,2,3),(1,2,4),(1,4,3),(2,3,4)),$);
+#62=IFCSTYLEDITEM(#61,(#52),$);
+#100=IFCBUILDINGELEMENTPROXY('1directStyledBody0000',$,'Direct',$,$,#101,#102,$,.NOTDEFINED.);
+#101=IFCLOCALPLACEMENT($,#5);
+#102=IFCPRODUCTDEFINITIONSHAPE($,$,(#103));
+#103=IFCSHAPEREPRESENTATION(#2,'Body','Tessellation',(#61));
+ENDSEC;
+END-ISO-10303-21;
+"#;
+
+/// [`DIRECT`] with a second face set (#71) listed first, coloured by a
+/// uniform `IfcIndexedColourMap`. Indexed colours are not deferred, so in the
+/// deferred chunk #61 falls back to the element colour taken from #71.
+fn indexed_first() -> String {
+    let ifc = DIRECT
+        .replace(
+            "#103=IFCSHAPEREPRESENTATION(#2,'Body','Tessellation',(#61));",
+            "#103=IFCSHAPEREPRESENTATION(#2,'Body','Tessellation',(#71,#61));
+#71=IFCTRIANGULATEDFACESET(#49,$,.T.,((1,2,3),(1,2,4),(1,4,3),(2,3,4)),$);
+#72=IFCINDEXEDCOLOURMAP(#71,$,#73,(1,1,1,1));
+#73=IFCCOLOURRGBLIST(((0.1,0.2,0.3)));",
+        );
+    assert_ne!(ifc, DIRECT, "indexed splice applied");
+    ifc
+}
+
+/// A `fast_first` pass without presentation layers meshes its first chunk
+/// before the attached styles are resolved, and the replay sends colours
+/// only. Every batch of that chunk still carries each item's own authored
+/// finish (#10698 review): the join must not wait for a style source that
+/// arrives after the chunk, nor take the fallback the mesh was coloured with.
+#[test]
+fn a_deferred_first_chunk_keeps_its_items_authored_finish_8341() {
+    let features = ProcessingRequest::default().features.finishes(true).presentation_layers(false);
+    let request = ProcessingRequest::default()
+        .features(features)
+        .batching(Batching::new(1, 1).fast_first(true));
+    for (what, ifc) in [("direct", DIRECT.to_string()), ("after an indexed-colour item", indexed_first())] {
+        let mut sink = Recorder::default();
+        process(ifc.as_bytes(), &request, &mut sink);
+        // With one job, every batch comes from the first, deferred chunk.
+        let roughness: Vec<_> = sink
+            .batches
+            .iter()
+            .flat_map(|(meshes, finishes)| meshes.iter().zip(finishes.as_ref().expect("announced")))
+            .map(|(mesh, finish)| (mesh.geometry_item_id, finish.and_then(|f| f.roughness).map(|r| (r * 100.0).round() / 100.0)))
+            .collect();
+        assert!(roughness.contains(&(Some(61), Some(0.25))), "{what}: the deferred chunk dropped #61's authored finish: {roughness:?}");
+        assert!(roughness.iter().all(|&(item, r)| item == Some(61) || r.is_none()), "{what}: a finish leaked to another item: {roughness:?}");
+    }
+}
