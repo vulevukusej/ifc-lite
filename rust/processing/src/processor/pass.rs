@@ -28,7 +28,7 @@ use crate::mesh_frame::MeshCoordinateSpace;
 use crate::style::{GeometryStyleInfo, ModelFinishes};
 use crate::types::mesh::{MeshData, RawInstanceOccurrence};
 use ifc_lite_core::EntityDecoder;
-use ifc_lite_geometry::{GeometryRouter, TessellationQuality};
+use ifc_lite_geometry::{GeometryRouter, RouterConfig, TessellationQuality};
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::HashSet;
@@ -62,6 +62,8 @@ pub(super) struct PassContext<'c> {
     /// Shared IfcMappedItem source cache (#1623): each RepresentationMap source is
     /// meshed once, not once per owning element.
     pub(super) mapped_item_cache: ifc_lite_geometry::SharedMappedItemCache,
+    /// One boolean cut per group of identical voided hosts (`IFC_LITE_CUT_CACHE=off` disables).
+    pub(super) cut_cache: Option<ifc_lite_geometry::SharedCutCache>,
     /// #1623 Phase 2 don't-bake plan (`Some` only when enabled).
     pub(super) instancing_plan: Option<ifc_lite_geometry::MappedInstancePlan>,
     /// #858 don't-bake exclusion: geometry ids carrying a MULTI-COLOUR
@@ -163,6 +165,12 @@ impl<'c> PassContext<'c> {
             .then(|| crate::style::indexed_colour_split_guard_ids(&indexed_colour_full))
             .flatten();
         let geometry_style_index = Arc::new(geometry_style_index);
+        let config = RouterConfig { unit_scale, rtc_offset, tessellation_quality: req.quality, ..RouterConfig::default() };
+        let plane_angle = facts.unit_scales.plane_angle_to_radians;
+        let void_index = super::empty_cuts::drop_empty_cuts(content, &entity_index, void_index, &config, plane_angle);
+        let layers = facts.material_layers.as_deref();
+        let cut_cache = ifc_lite_geometry::CutCache::build(&void_index, || entity_index.decoder(content),
+            |id| layers.is_some_and(|layers| layers.is_sliceable(id)));
         let run = RunSnapshot::new(crate::element::OwnedMeshProductionData {
             void_index: Arc::new(void_index),
             geometry_style_index: Arc::clone(&geometry_style_index),
@@ -186,6 +194,7 @@ impl<'c> PassContext<'c> {
             item_dedup_cache: GeometryRouter::new_dedup_cache(),
             brep_signature_cache: GeometryRouter::new_brep_signature_cache(),
             mapped_item_cache: GeometryRouter::new_mapped_item_cache(),
+            cut_cache,
             instancing_plan,
             indexed_colour_split_ids,
             raw_instance_collector: std::sync::Mutex::new(Vec::new()),

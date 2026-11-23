@@ -105,6 +105,8 @@ mod terrain_cdt;
 mod clash_contact_axes;
 pub mod clash_solid;
 pub mod csg;
+/// Openings that remove nothing from their host, judged before any cut.
+pub mod empty_cut;
 /// Opt-in geometry document: object-local display-mesh definitions and f64
 /// placed occurrences with typed identity and revision. Off every default path.
 pub mod document;
@@ -280,6 +282,9 @@ pub use terrain_cdt::{
 };
 pub use kernel::plane_weld::take_plane_weld_stats;
 pub use router::take_bool2d_stats;
+pub use router::voids::cut_cache::{
+    cut_cache_enabled, cut_cache_set_enabled_override, take_cut_cache_groups, take_cut_cache_stats, CutCache, CutCacheStats, SharedCutCache,
+};
 pub use router::{take_prism_defers, take_prism_stats};
 pub use router::{
     aggregate_diagnostics, count_attributed_products, format_unsupported_breakdown,

@@ -87,6 +87,16 @@ impl<const K: usize> FixedInt<K> {
     pub fn is_negative(self) -> bool {
         self.0[K - 1] >> 63 == 1
     }
+
+    /// The same value in `M >= K` limbs (sign-extended).
+    #[inline]
+    pub fn widen<const M: usize>(self) -> FixedInt<M> {
+        debug_assert!(M >= K);
+        let fill = if self.is_negative() { u64::MAX } else { 0 };
+        let mut limbs = [fill; M];
+        limbs[..K].copy_from_slice(&self.0);
+        FixedInt(limbs)
+    }
 }
 
 // ── Native limb helpers (the hot path) ──────────────────────────────────────

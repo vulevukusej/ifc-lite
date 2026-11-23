@@ -10,7 +10,7 @@ use super::classify::{
     BComponents,
 };
 use super::ray_parity::{operand_extent, point_inside};
-use super::{arrange, arrange_many, Arrangement, BoolOp, MultiArrangement, Tri};
+use super::{arrange, arrange_many, Arrangement, BoolOp, Tri};
 use num_traits::ToPrimitive;
 
 /// `∪ meshes` as a watertight triangle list — the N-ary union.
@@ -24,7 +24,7 @@ use num_traits::ToPrimitive;
 /// (e.g. duplicated cutter prisms) are kept once, owned by the LOWEST mesh index.
 ///
 /// Returns `(union, conforming)`. `conforming == false` ⇒ the N-way arrangement
-/// left an unrecovered constraint ([`MultiArrangement::unrecovered`]): some
+/// left an unrecovered constraint ([`super::MultiArrangement::unrecovered`]): some
 /// sub-triangle STRADDLES another operand's boundary and its centroid
 /// classification is unreliable, so the union may be TORN. This is the SAME
 /// non-conformity condition [`difference_all`] HARD-REJECTS — surfaced here as a
@@ -57,14 +57,17 @@ pub fn union_all(meshes: &[&[Tri]]) -> (Vec<Tri>, bool) {
     // Owner map: oriented (winding-preserving) Vid key → lowest mesh index that
     // KEEPS that face. A later mesh's identical co-oriented copy is dropped.
     let mut owner: HashMap<[Vid; 3], usize> = HashMap::new();
+    // Each Vid materialised once: centroid, normal and output all read the
+    // same vertices, and `point_via_interner` is a pure function of the point.
+    let mut points = PointCache::new(&arr.interner);
     // First pass: decide keep per sub-triangle (boundary of the union), recording
     // the canonical owner of each kept oriented face.
     let mut keep: Vec<Vec<bool>> = Vec::with_capacity(meshes.len());
     for (k, sub) in arr.subtris.iter().enumerate() {
         let mut kk = Vec::with_capacity(sub.len());
         for &tri in sub {
-            let c = centroid_multi(&arr, tri);
-            let n = tri_normal_multi(&arr, tri);
+            let c = centroid_multi(&mut points, tri);
+            let n = tri_normal_multi(&mut points, tri);
             // outer side just past the face along +n
             let outer = offset_point(c, n, exts[k]);
             // on the union boundary iff the outer side is outside ALL other meshes
@@ -90,11 +93,7 @@ pub fn union_all(meshes: &[&[Tri]]) -> (Vec<Tri>, bool) {
     for (k, sub) in arr.subtris.iter().enumerate() {
         for (t, &tri) in sub.iter().enumerate() {
             if keep[k][t] {
-                out.push([
-                    point_via_interner(&arr.interner, tri[0]),
-                    point_via_interner(&arr.interner, tri[1]),
-                    point_via_interner(&arr.interner, tri[2]),
-                ]);
+                out.push([points.get(tri[0]), points.get(tri[1]), points.get(tri[2])]);
             }
         }
     }
@@ -116,13 +115,26 @@ fn offset_point(c: [f64; 3], dir: [f64; 3], far_l: f64) -> [f64; 3] {
     ]
 }
 
+/// Per-Vid memo of [`point_via_interner`] over one multi-arrangement.
+struct PointCache<'a> {
+    interner: &'a Interner,
+    points: Vec<Option<[f64; 3]>>,
+}
+
+impl<'a> PointCache<'a> {
+    fn new(interner: &'a Interner) -> Self {
+        Self { interner, points: vec![None; interner.len()] }
+    }
+
+    fn get(&mut self, v: Vid) -> [f64; 3] {
+        let slot = &mut self.points[v as usize];
+        *slot.get_or_insert_with(|| point_via_interner(self.interner, v))
+    }
+}
+
 /// Centroid of a multi-arrangement sub-triangle (interner lookup).
-fn centroid_multi(arr: &MultiArrangement, tri: [Vid; 3]) -> [f64; 3] {
-    let c = [
-        point_via_interner(&arr.interner, tri[0]),
-        point_via_interner(&arr.interner, tri[1]),
-        point_via_interner(&arr.interner, tri[2]),
-    ];
+fn centroid_multi(points: &mut PointCache<'_>, tri: [Vid; 3]) -> [f64; 3] {
+    let c = [points.get(tri[0]), points.get(tri[1]), points.get(tri[2])];
     [
         (c[0][0] + c[1][0] + c[2][0]) / 3.0,
         (c[0][1] + c[1][1] + c[2][1]) / 3.0,
@@ -130,12 +142,8 @@ fn centroid_multi(arr: &MultiArrangement, tri: [Vid; 3]) -> [f64; 3] {
     ]
 }
 
-fn tri_normal_multi(arr: &MultiArrangement, tri: [Vid; 3]) -> [f64; 3] {
-    let (a, b, c) = (
-        point_via_interner(&arr.interner, tri[0]),
-        point_via_interner(&arr.interner, tri[1]),
-        point_via_interner(&arr.interner, tri[2]),
-    );
+fn tri_normal_multi(points: &mut PointCache<'_>, tri: [Vid; 3]) -> [f64; 3] {
+    let (a, b, c) = (points.get(tri[0]), points.get(tri[1]), points.get(tri[2]));
     cross3(sub_f64(b, a), sub_f64(c, a))
 }
 

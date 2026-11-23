@@ -41,7 +41,7 @@ pub(crate) fn drop_out_of_plane(
     axis: DropAxis,
 ) {
     // (1) degenerate: a segment collapsing to a point in the drop-axis projection.
-    let proj = |v: Vid| super::fixed::point_to_f64(interner.get(v)).map(|p| project2d(p, axis));
+    let proj = |v: Vid| interner.point_f64(v).map(|p| project2d(p, axis));
     canon.segments.retain(|&(lo, hi)| match (proj(lo), proj(hi)) {
         (Some(a), Some(b)) => a[0] != b[0] || a[1] != b[1],
         _ => true,
@@ -60,7 +60,7 @@ pub(crate) fn drop_out_of_plane(
     let extent = tri.iter().flat_map(|c| c.iter()).fold(0.0_f64, |m, &x| m.max(x.abs()));
     let tol = 1.0e-3_f64.max(extent * tol::F32_ULP_SCALE);
     let on_plane = |vid: Vid| {
-        super::fixed::point_to_f64(interner.get(vid)).is_none_or(|p| {
+        interner.point_f64(vid).is_none_or(|p| {
             ((p[0] - p0[0]) * n[0] + (p[1] - p0[1]) * n[1] + (p[2] - p0[2]) * n[2]).abs() <= tol
         })
     };

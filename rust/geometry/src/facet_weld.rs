@@ -456,6 +456,33 @@ fn aspect(a: [f64; 3], b: [f64; 3], c: [f64; 3]) -> f64 {
     }
 }
 
+/// Length of the segment `p`–`q`.
+#[inline]
+fn edge_length(p: [f64; 3], q: [f64; 3]) -> f64 {
+    ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt()
+}
+
+/// The longest edge length of triangle `abc` when it is a sliver the
+/// refinement may split: aspect over [`SLIVER_ASPECT`], inside the region,
+/// and, in scoped mode, of finite aspect (see `MAX_SCOPED_SPLITS`).
+#[inline]
+fn split_length(
+    a: [f64; 3],
+    b: [f64; 3],
+    c: [f64; 3],
+    scoped: bool,
+    in_region: &impl Fn([f64; 3], [f64; 3], [f64; 3]) -> bool,
+) -> Option<f64> {
+    let asp = aspect(a, b, c);
+    if asp <= SLIVER_ASPECT || !in_region(a, b, c) {
+        return None;
+    }
+    if scoped && !asp.is_finite() {
+        return None;
+    }
+    Some(edge_length(a, b).max(edge_length(b, c)).max(edge_length(c, a)))
+}
+
 /// WATERTIGHT sliver refinement (issue #1007): bisect the LONGEST edge of any
 /// triangle whose aspect ratio exceeds [`SLIVER_ASPECT`], splitting BOTH
 /// triangles incident to that edge at the SAME midpoint so the mesh stays
@@ -703,13 +730,39 @@ fn refine_high_aspect_slivers_impl(
     const MAX_SCOPED_SPLITS: usize = 2048;
     let mut splits_done = 0usize;
     for _round in 0..MAX_BISECT_ROUNDS {
-        // Build edge → incident triangle indices (deterministic BTreeMap).
-        let mut edge_tris: BTreeMap<(usize, usize), Vec<usize>> = BTreeMap::new();
-        for (ti, t) in tris.iter().enumerate() {
+        // Only an edge that is the longest edge of a qualifying sliver can be
+        // split, so collect those candidates first and build the edge →
+        // incident triangle map for them alone, in ascending key order like
+        // the whole-mesh map it replaces. Every other edge would be visited
+        // and skipped below, so the chosen edges are the same.
+        let mut candidates: Vec<(usize, usize)> = Vec::new();
+        for t in &tris {
+            let (a, b, c) = (cpos[t[0]], cpos[t[1]], cpos[t[2]]);
+            let Some(longest) = split_length(a, b, c, region.is_some(), &tri_in_region) else {
+                continue;
+            };
             for (u, v) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
-                edge_tris.entry(edge_key(u, v)).or_default().push(ti);
+                let (x, y) = edge_key(u, v);
+                if (edge_length(cpos[x], cpos[y]) - longest).abs() < 1.0e-9 {
+                    candidates.push((x, y));
+                }
             }
         }
+        if candidates.is_empty() {
+            break; // no sliver left
+        }
+        candidates.sort_unstable();
+        candidates.dedup();
+        let mut incident_of: rustc_hash::FxHashMap<(usize, usize), Vec<usize>> =
+            candidates.iter().map(|&ek| (ek, Vec::new())).collect();
+        for (ti, t) in tris.iter().enumerate() {
+            for (u, v) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+                if let Some(incident) = incident_of.get_mut(&edge_key(u, v)) {
+                    incident.push(ti);
+                }
+            }
+        }
+        let edge_tris = candidates.iter().map(|ek| (ek, &incident_of[ek]));
 
         // Collect this round's split edges — lowest-keyed long edges of
         // triangles over the aspect threshold. Deterministic (BTreeMap order).
@@ -729,7 +782,7 @@ fn refine_high_aspect_slivers_impl(
         // that same order).
         let mut round_edges: Vec<(usize, usize)> = Vec::new();
         let mut claimed: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
-        'outer: for (ek, incident) in &edge_tris {
+        'outer: for (ek, incident) in edge_tris {
             // Only split a manifold (2-incident) or boundary (1-incident) edge;
             // a non-manifold (>2) edge is skipped (splitting it can't stay
             // watertight without splitting all incident tris in lockstep, and
@@ -742,34 +795,15 @@ fn refine_high_aspect_slivers_impl(
             }
             for &ti in incident {
                 let t = tris[ti];
-                let a = cpos[t[0]];
-                let b = cpos[t[1]];
-                let c = cpos[t[2]];
-                let asp = aspect(a, b, c);
-                if asp <= SLIVER_ASPECT || !tri_in_region(a, b, c) {
+                let (a, b, c) = (cpos[t[0]], cpos[t[1]], cpos[t[2]]);
+                let Some(longest) = split_length(a, b, c, region.is_some(), &tri_in_region) else {
                     continue;
-                }
-                // Scoped mode: finite-aspect slivers only (see MAX_SCOPED_SPLITS).
-                if region.is_some() && !asp.is_finite() {
-                    continue;
-                }
+                };
                 // Is THIS edge the triangle's LONGEST? Bisecting the longest
                 // edge is what reduces the aspect; splitting a short edge of a
                 // sliver makes it worse.
-                let d = |p: [f64; 3], q: [f64; 3]| {
-                    ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt()
-                };
-                let e01 = d(a, b);
-                let e12 = d(b, c);
-                let e20 = d(c, a);
-                let longest = e01.max(e12).max(e20);
-                let this_len = {
-                    let (x, y) = *ek;
-                    let px = cpos[x];
-                    let py = cpos[y];
-                    d(px, py)
-                };
-                if (this_len - longest).abs() < 1.0e-9 {
+                let (x, y) = *ek;
+                if (edge_length(cpos[x], cpos[y]) - longest).abs() < 1.0e-9 {
                     round_edges.push(*ek);
                     claimed.extend(incident.iter().copied());
                     if region.is_none() {

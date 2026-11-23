@@ -21,6 +21,7 @@ mod csg_summary;
 #[path = "csg_summary_tests.rs"]
 mod csg_summary_tests;
 mod diagnostics;
+mod empty_cuts;
 mod entity_index;
 pub(crate) mod entry_points;
 #[allow(deprecated)]// the deprecated delegates stay exported until the next major

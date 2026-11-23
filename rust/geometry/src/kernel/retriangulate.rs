@@ -50,10 +50,26 @@ pub(crate) fn orient2d_v(it: &Interner, a: Vid, b: Vid, c: Vid, axis: DropAxis) 
     if let Some(s) = interval::orient2d_from_lam_iv(it.lam_iv(a), it.lam_iv(b), it.lam_iv(c), axis) {
         return s;
     }
-    if let (Some(la), Some(lb), Some(lc)) = (it.lam(a), it.lam(b), it.lam(c)) {
+    let lams = (it.lam(a), it.lam(b), it.lam(c));
+    if let (Some(la), Some(lb), Some(lc)) = lams {
         if let Some(s) = fixed::orient2d_from_lam(la, lb, lc, axis) {
             return s;
         }
+    }
+    // Three implicit points: `orient2d_any` would rerun the interval tier on
+    // the very lambdas the interner cached, the same determinant that just
+    // straddled above, so go straight to its exact tiers. Their first tier
+    // re-derives the three lambdas width by width; the cached ones, widened,
+    // give the same exact sign without that.
+    if ![pa, pb, pc].iter().any(|p| matches!(p, ImplicitPoint::Explicit(_))) {
+        if let (Some(la), Some(lb), Some(lc)) = lams {
+            super::budget::note_escalation();
+            if let Some(s) = fixed::orient2d_from_lam_wide(la, lb, lc, axis) {
+                return s;
+            }
+            return super::predicates::orient2d_3i_exact_counted(pa, pb, pc, axis);
+        }
+        return super::predicates::orient2d_3i_exact(pa, pb, pc, axis);
     }
     orient2d_any(pa, pb, pc, axis)
 }
@@ -71,6 +87,12 @@ pub(crate) fn cmp_lex_v(it: &Interner, a: Vid, b: Vid) -> Sign {
         }
     }
     let (pa, pb) = (it.get(a), it.get(b));
+    // Two implicit points: the interval tier of `cmp_lex` is the per-axis
+    // determinant `cmp_lex_from_lam_iv` just evaluated on the same cached
+    // lambdas, so it cannot resolve either; skip to the exact tiers.
+    if !matches!(pa, ImplicitPoint::Explicit(_)) && !matches!(pb, ImplicitPoint::Explicit(_)) {
+        return super::predicates::cmp_lex_exact(pa, pb);
+    }
     cmp_lex(pa, pb)
 }
 
@@ -286,7 +308,7 @@ pub(crate) fn coord2d_cached(
     if let Some(&c) = cache.get(&v) {
         return c;
     }
-    let c = fixed::point_to_f64(it.get(v)).map(|p3| project2d(p3, axis));
+    let c = it.point_f64(v).map(|p3| project2d(p3, axis));
     cache.insert(v, c);
     c
 }
@@ -449,7 +471,7 @@ pub fn earcut(it: &Interner, ring: &[Vid], axis: DropAxis, w0: Sign) -> Vec<SubT
     // whole triangulation, is byte-identical to the all-exact form (parity).
     let mut pc: Vec<Option<[f64; 2]>> = poly
         .iter()
-        .map(|&v| fixed::point_to_f64(it.get(v)).map(|p3| project2d(p3, axis)))
+        .map(|&v| it.point_f64(v).map(|p3| project2d(p3, axis)))
         .collect();
     let mut out = Vec::new();
     while poly.len() > 3 {
